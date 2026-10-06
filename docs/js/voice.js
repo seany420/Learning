@@ -115,6 +115,32 @@ function setAudioSession(type) {
   } catch {}
 }
 
+// One shared Web Audio context for playback and the mic level meter. iOS
+// only lets it start from a tap; once running it can play at any time.
+let sharedCtx = null;
+
+export function audioCtx() {
+  if (!sharedCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) sharedCtx = new AC();
+  }
+  return sharedCtx;
+}
+
+// Call from a tap handler.
+export function resumeAudio() {
+  const ctx = audioCtx();
+  if (!ctx) return;
+  try {
+    if (ctx.state !== "running") ctx.resume();
+    // Playing a tiny silent buffer inside the tap fully unlocks iOS audio.
+    const src = ctx.createBufferSource();
+    src.buffer = ctx.createBuffer(1, 1, 22050);
+    src.connect(ctx.destination);
+    src.start(0);
+  } catch {}
+}
+
 const SILENT_WAV =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
 
@@ -140,9 +166,10 @@ export class Speaker {
 
   // Must be called from a tap handler once, so iOS lets us play audio later.
   unlock() {
+    setAudioSession("playback");
+    resumeAudio();
     if (this.unlocked) return;
     this.unlocked = true;
-    setAudioSession("playback");
     try {
       this.audio.src = SILENT_WAV;
       const p = this.audio.play();
@@ -183,10 +210,10 @@ export class Speaker {
           this.queue.push(Promise.resolve(() => this.playDevice([seg], s, gen)));
           continue;
         }
-        const job = withTimeout(kokoroSpeak(seg.text, s.kokoroVoice), 30000, "it took too long");
+        const job = withTimeout(kokoroSpeak(seg.text, s.kokoroVoice, s.speechRate || 1), 30000, "it took too long");
         this.queue.push(
           job.then(
-            (blob) => () => this.playBlob(blob, s, gen),
+            (pcm) => () => this.playPcm(pcm, gen),
             (err) => {
               this.onError?.(new Error(`Natural voice failed (${err.message}). Using iPhone voice instead.`));
               return () => this.playDevice([seg], s, gen);
@@ -279,7 +306,10 @@ export class Speaker {
       };
       this.finishCurrent = done;
       this.audio.onended = done;
-      this.audio.onerror = done;
+      this.audio.onerror = () => {
+        this.onError?.(new Error("This phone couldn't play that audio."));
+        done();
+      };
       this.audio.src = url;
       this.audio.playbackRate = s.speechRate || 1;
       this.audio.preservesPitch = true;
@@ -288,6 +318,40 @@ export class Speaker {
         this.onError?.(new Error("Audio playback was blocked. Tap the mic button once to enable sound."));
         done();
       });
+    });
+  }
+
+  // Plays raw samples through Web Audio (used by the natural voice).
+  async playPcm({ samples, rate }, gen) {
+    if (gen !== this.gen || !samples?.length) return;
+    const ctx = audioCtx();
+    if (!ctx) throw new Error("This browser can't play generated audio.");
+    setAudioSession("playback");
+    if (ctx.state !== "running") {
+      try {
+        await ctx.resume();
+      } catch {}
+    }
+    if (ctx.state !== "running") throw new Error("Sound is blocked. Tap the mic or Test voice again to enable it.");
+    const buffer = ctx.createBuffer(1, samples.length, rate);
+    buffer.copyToChannel(samples instanceof Float32Array ? samples : Float32Array.from(samples), 0);
+    await new Promise((resolve) => {
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      const done = () => {
+        src.onended = null;
+        this.finishCurrent = null;
+        resolve();
+      };
+      src.onended = done;
+      this.finishCurrent = () => {
+        try {
+          src.stop();
+        } catch {}
+        done();
+      };
+      src.start();
     });
   }
 
@@ -419,8 +483,8 @@ export class Listener {
   // Call inside a tap handler so iOS allows the audio context to run.
   prime() {
     try {
-      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      if (this.ctx.state === "suspended") this.ctx.resume();
+      if (!this.ctx) this.ctx = audioCtx();
+      if (this.ctx && this.ctx.state === "suspended") this.ctx.resume();
     } catch {}
   }
 

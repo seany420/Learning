@@ -87,12 +87,15 @@ export function loadKokoro() {
 }
 
 // Generates one clip at a time (the model can't run 2 jobs at once), in the
-// order requested. Resolves with a WAV blob.
-export function kokoroSpeak(text, voice) {
+// order requested.
+// Resolves with raw samples ({ samples: Float32Array, rate }) rather than a
+// WAV file: Kokoro writes 32-bit float WAV, which Safari's audio player
+// can't open, so the app plays the samples through Web Audio instead.
+export function kokoroSpeak(text, voice, speed = 1) {
   const job = chain.then(async () => {
     const tts = await loadKokoro();
-    const audio = await tts.generate(text, { voice: voice || "af_heart" });
-    return audio.toBlob();
+    const audio = await tts.generate(text, { voice: voice || "af_heart", speed: Math.min(2, Math.max(0.5, speed)) });
+    return { samples: audio.audio, rate: audio.sampling_rate };
   });
   chain = job.catch(() => {});
   return job;
