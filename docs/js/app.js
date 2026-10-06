@@ -320,6 +320,9 @@ class SessionController {
       else if (this.state === "speaking") this.setState(this.abort ? "thinking" : "idle");
     };
     speaker.onError = (err) => this.showError(err.message);
+    speaker.onNotice = (st) => {
+      if (this.alive && st.status === "loading") this.setStatus(`Natural voice downloading (${st.progress}%). Using the iPhone voice until it's ready.`);
+    };
     listener.onLevel = (lvl) => this.$ring.style.setProperty("--lvl", lvl.toFixed(2));
     listener.onInterim = (t) => (this.$interim.textContent = t);
     listener.onRecorded = () => this.alive && this.setState("transcribing");
@@ -741,6 +744,7 @@ function renderSettings() {
             </select>
           </label>
           <button type="button" class="btn" id="test-voice">${ICONS.play} Test voice</button>
+          <p class="hint" id="test-status" aria-live="polite"></p>
         </section>
 
         <section class="card">
@@ -891,10 +895,20 @@ function renderSettings() {
     save();
     speaker.unlock();
     speaker.stop();
+    const testStatus = document.getElementById("test-status");
+    const engine = store.getSettings().ttsProvider;
+    testStatus.textContent = "";
     speaker.onError = (err) => {
-      const el = document.getElementById("saved");
-      if (el) el.textContent = err.message;
+      if (document.body.contains(testStatus)) testStatus.textContent = err.message;
     };
+    speaker.onNotice = (st) => {
+      if (!document.body.contains(testStatus)) return;
+      testStatus.textContent =
+        st.status === "error"
+          ? `The natural voice couldn't load (${st.error}), so you're hearing the iPhone voice.`
+          : `The natural voice is still downloading (${st.progress}%), so you're hearing the iPhone voice for now. Test again when it says Ready.`;
+    };
+    if (engine === "kokoro" && kokoroState().status === "ready") testStatus.textContent = "Playing the natural voice. The first sentence can take a few seconds.";
     speaker.say("Hi! This is how I'll sound in your lessons.");
     speaker.say("En español: <es>¡Hola! ¿Cómo estás hoy?</es>");
     speaker.say("And in Japanese: <ja>こんにちは。よろしくお願いします。</ja> [[konnichiwa]]");
