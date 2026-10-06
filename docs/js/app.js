@@ -622,6 +622,19 @@ class SessionController {
 
 // ---------- settings ----------
 
+function voiceRank(v) {
+  const id = `${v.name} ${v.voiceURI}`.toLowerCase();
+  if (id.includes("premium")) return 2;
+  if (id.includes("enhanced") || id.includes("neural")) return 1;
+  return 0;
+}
+
+function voiceLabel(v) {
+  const tier = ["", " · Enhanced", " · Premium"][voiceRank(v)];
+  const name = /\((premium|enhanced)\)/i.test(v.name) ? v.name : v.name + tier;
+  return `${name} (${v.lang})`;
+}
+
 const OPENAI_VOICES = ["marin", "cedar", "coral", "sage", "ballad", "verse", "ash", "alloy", "echo", "shimmer", "nova", "onyx", "fable"];
 
 function renderSettings() {
@@ -697,7 +710,9 @@ function renderSettings() {
             </label>
           </div>
           <div data-show="device">
-            <p class="hint">For much better iPhone voices, download Enhanced or Premium voices: iPhone Settings › Accessibility › Spoken Content › Voices (English, Spanish, Japanese). Then reopen this page and pick them here.</p>
+            <p class="hint">For much better iPhone voices, download Premium or Enhanced voices in iPhone Settings › Accessibility › Read &amp; Speak › Voices (on older iOS: Spoken Content › Voices). Then tap Refresh voice list.</p>
+            <button type="button" class="btn" id="refresh-voices">${ICONS.replay} Refresh voice list</button>
+            <p class="hint" id="voice-count"></p>
             <label>English voice <select name="dv-en"></select></label>
             <label>Spanish voice <select name="dv-es"></select></label>
             <label>Japanese voice <select name="dv-ja"></select></label>
@@ -754,17 +769,54 @@ function renderSettings() {
   };
   const fillVoices = () => {
     const voices = deviceVoices();
+    let found = 0;
     for (const lang of ["en", "es", "ja"]) {
       const sel = form[`dv-${lang}`];
       const cur = store.getSettings().deviceVoices[lang];
-      const list = voices.filter((v) => v.lang?.toLowerCase().startsWith(lang));
+      const seen = new Set();
+      const list = voices
+        .filter((v) => v.lang?.replace("_", "-").toLowerCase().startsWith(lang))
+        .filter((v) => !seen.has(v.name + v.lang) && seen.add(v.name + v.lang))
+        .sort((a, b) => voiceRank(b) - voiceRank(a) || a.name.localeCompare(b.name));
+      found += list.length;
       sel.innerHTML =
         opt("", cur, "Automatic (best available)") +
-        list.map((v) => opt(v.name, cur, `${v.name} (${v.lang})`)).join("");
+        list.map((v) => opt(v.name, cur, voiceLabel(v))).join("");
     }
+    const count = document.getElementById("voice-count");
+    if (count) {
+      const better = voices.filter((v) => voiceRank(v) > 0).length;
+      count.textContent = voices.length
+        ? `Found ${found} English, Spanish, and Japanese voices on this phone (${better} Premium or Enhanced).`
+        : "No voices loaded yet. Tap Refresh voice list.";
+    }
+    return voices.length;
   };
-  fillVoices();
+  // iPhones load their voice list late and don't always announce it, so keep
+  // checking for a few seconds after Settings opens.
+  const pollVoices = () => {
+    let tries = 0;
+    let last = -1;
+    const tick = () => {
+      if (!document.getElementById("voice-count")) return;
+      const n = fillVoices();
+      if (++tries < 15 && (n === 0 || n !== last)) setTimeout(tick, 400);
+      last = n;
+    };
+    tick();
+  };
+  pollVoices();
   if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = fillVoices;
+  document.getElementById("refresh-voices").onclick = () => {
+    // Speaking once (silently) makes Safari load the full voice list.
+    speaker.unlock();
+    try {
+      const u = new SpeechSynthesisUtterance(" ");
+      u.volume = 0;
+      speechSynthesis.speak(u);
+    } catch {}
+    pollVoices();
+  };
   showFor();
 
   const save = () => {
