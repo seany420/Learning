@@ -19,6 +19,8 @@ When you tap **End lesson**, the tutor writes itself private notes: what you cov
 - **An OpenAI API key** (recommended). It gives you the natural voice and the speech recognition that handles English, Spanish, and Japanese in the same sentence. Get one at [platform.openai.com](https://platform.openai.com).
 - An **ElevenLabs key** if you want the most human-sounding voice. This one's optional.
 
+**No paid voice key? Use the Natural voice.** In Settings, set **Voice engine** to **Natural voice**. It's [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M), a free, open-source voice that runs on your phone. It downloads about 90 MB the first time (use Wi-Fi) and speaks English. Spanish and Japanese phrases use the iPhone voices. The tutor may take a second or 2 longer to start talking, because your phone does the work.
+
 With no OpenAI key, the app uses the iPhone's built-in voices and dictation, which are free. For better built-in voices, go to iPhone **Settings › Accessibility › Read & Speak › Voices** (on older iOS, **Spoken Content › Voices**) and download the *Premium* or *Enhanced* English, Spanish, and Japanese voices. Then, in the app's Settings, tap **Refresh voice list** and pick them.
 
 Your keys stay on your phone. The app sends them only to Anthropic, OpenAI, or ElevenLabs. Set a monthly spending limit in each dashboard. My rough estimate for a 30-minute lesson is 50¢ to $1 using Opus 5.5 and the OpenAI voice. Sonnet 5.5 costs less. Check your own usage after a few lessons.
