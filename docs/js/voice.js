@@ -1,4 +1,4 @@
-import { kokoroSpeak } from "./kokoro.js";
+import { kokoroSpeak, kokoroState, loadKokoro } from "./kokoro.js";
 
 // Speech in and speech out.
 //
@@ -133,6 +133,7 @@ export class Speaker {
     this.unlocked = false;
     this.onStateChange = null; // (speaking: boolean) => void
     this.onError = null;
+    this.onNotice = null; // natural voice not ready yet: (kokoroState) => void
     this.idleWaiters = [];
     this.lastText = "";
   }
@@ -166,7 +167,14 @@ export class Speaker {
     const gen = this.gen;
     this.lastText += text + " ";
     let ready;
-    const engine = effectiveTts(s);
+    let engine = effectiveTts(s);
+    if (engine === "kokoro" && kokoroState().status !== "ready") {
+      // Never sit silent while the natural voice downloads: speak with the
+      // iPhone voice for now and keep loading in the background.
+      if (kokoroState().status !== "error") loadKokoro().catch(() => {});
+      this.onNotice?.(kokoroState());
+      engine = "device";
+    }
     if (engine === "kokoro") {
       // English goes to the on-phone natural voice; Spanish and Japanese
       // phrases go to iPhone voices, in order.
@@ -175,7 +183,7 @@ export class Speaker {
           this.queue.push(Promise.resolve(() => this.playDevice([seg], s, gen)));
           continue;
         }
-        const job = kokoroSpeak(seg.text, s.kokoroVoice);
+        const job = withTimeout(kokoroSpeak(seg.text, s.kokoroVoice), 30000, "it took too long");
         this.queue.push(
           job.then(
             (blob) => () => this.playBlob(blob, s, gen),
@@ -304,6 +312,10 @@ export class Speaker {
       });
     }
   }
+}
+
+function withTimeout(promise, ms, why) {
+  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(why)), ms))]);
 }
 
 // ---------- TTS providers ----------

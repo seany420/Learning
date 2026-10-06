@@ -41,7 +41,10 @@ export function onKokoroState(fn) {
   return () => listeners.delete(fn);
 }
 
+let lastActivity = 0;
+
 function onProgress(e) {
+  lastActivity = Date.now();
   if (e?.status !== "progress" || !e.file || !e.total) return;
   fileProgress.set(e.file, { loaded: e.loaded, total: e.total });
   let loaded = 0;
@@ -56,10 +59,22 @@ function onProgress(e) {
 export function loadKokoro() {
   if (!ttsPromise) {
     emit({ status: "loading", progress: 0, error: null });
-    ttsPromise = (async () => {
+    lastActivity = Date.now();
+    const load = (async () => {
       const { KokoroTTS } = await import("../vendor/kokoro.web.js");
       return KokoroTTS.from_pretrained(MODEL, { dtype: "q8", device: "wasm", progress_callback: onProgress });
     })();
+    // Give up if nothing happens for 2 minutes, so the app never waits forever.
+    const stalled = new Promise((_, reject) => {
+      const timer = setInterval(() => {
+        if (Date.now() - lastActivity > 120000) {
+          clearInterval(timer);
+          reject(new Error("the download stalled. Check your connection and try again"));
+        }
+      }, 5000);
+      load.finally(() => clearInterval(timer)).catch(() => {});
+    });
+    ttsPromise = Promise.race([load, stalled]);
     ttsPromise.then(
       () => emit({ status: "ready", progress: 100 }),
       (err) => {
