@@ -164,7 +164,7 @@ export class Speaker {
     const gen = this.gen;
     this.lastText += text + " ";
     let ready;
-    if (s.ttsProvider === "device") {
+    if (effectiveTts(s) === "device") {
       const segs = toSegments(text);
       ready = Promise.resolve(() => this.playDevice(segs, s, gen));
     } else {
@@ -283,6 +283,13 @@ export class Speaker {
 
 // ---------- TTS providers ----------
 
+// Falls back to the iPhone's own voices when the chosen service has no key.
+export function effectiveTts(s) {
+  if (s.ttsProvider === "openai" && !s.openaiKey) return "device";
+  if (s.ttsProvider === "elevenlabs" && !s.elevenKey) return "device";
+  return s.ttsProvider;
+}
+
 const OPENAI_STYLE =
   "Speak like a warm, engaged human tutor on a phone call: natural pacing, real warmth, light humor where it fits. " +
   "When you say Spanish or Japanese words, pronounce them like a native speaker, a little slower and very clearly so a learner can imitate them.";
@@ -346,7 +353,12 @@ export function pickDeviceVoice(lang, preferredName) {
   const matches = voices.filter((v) => v.lang?.replace("_", "-").toLowerCase().startsWith(base));
   const exact = matches.filter((v) => v.lang.replace("_", "-").toLowerCase() === locale.toLowerCase());
   const pool = exact.length ? exact : matches;
-  return pool.find((v) => QUALITY.test(v.name)) || pool[0] || null;
+  return (
+    pool.find((v) => /premium/i.test(`${v.name} ${v.voiceURI}`)) ||
+    pool.find((v) => QUALITY.test(`${v.name} ${v.voiceURI}`)) ||
+    pool[0] ||
+    null
+  );
 }
 
 // ---------- Listening ----------
