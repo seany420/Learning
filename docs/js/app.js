@@ -12,6 +12,7 @@ import {
   deviceVoices,
   deviceSttAvailable,
 } from "./voice.js";
+import { KOKORO_VOICES, loadKokoro, kokoroState, onKokoroState } from "./kokoro.js";
 
 const $app = document.getElementById("app");
 const speaker = new Speaker(store.getSettings);
@@ -323,6 +324,13 @@ class SessionController {
     listener.onInterim = (t) => (this.$interim.textContent = t);
     listener.onRecorded = () => this.alive && this.setState("transcribing");
 
+    this.unsubKokoro = onKokoroState((st) => {
+      if (!this.alive || st.status !== "loading") return;
+      if (this.state === "thinking" || this.state === "speaking") {
+        this.setStatus(`Loading the natural voice (first time only)… ${st.progress}%`);
+      }
+    });
+
     this.onVisibility = () => {
       if (document.visibilityState === "visible" && this.state !== "idle") this.requestWakeLock();
     };
@@ -611,6 +619,7 @@ class SessionController {
     if (listener.listening) listener.cancel();
     if (this.data.messages.length) store.saveSession(this.key, this.data);
     document.removeEventListener("visibilitychange", this.onVisibility);
+    this.unsubKokoro?.();
     try {
       this.wakeLock?.release();
     } catch {}
@@ -682,6 +691,7 @@ function renderSettings() {
             <select name="ttsProvider">
               ${opt("openai", s.ttsProvider, "OpenAI (natural, recommended)")}
               ${opt("elevenlabs", s.ttsProvider, "ElevenLabs (most human)")}
+              ${opt("kokoro", s.ttsProvider, "Natural voice (free, runs on your phone)")}
               ${opt("device", s.ttsProvider, "iPhone voices (free, offline)")}
             </select>
           </label>
@@ -709,7 +719,15 @@ function renderSettings() {
               </select>
             </label>
           </div>
-          <div data-show="device">
+          <div data-show="kokoro">
+            <p class="hint">A free, open-source voice that runs on your phone. It speaks English. Spanish and Japanese phrases use the iPhone voices below. The first time, it downloads about 90 MB (use Wi-Fi), then works without downloading again.</p>
+            <label>Natural voice
+              <select name="kokoroVoice">${KOKORO_VOICES.map(([id, label]) => opt(id, s.kokoroVoice, label)).join("")}</select>
+            </label>
+            <button type="button" class="btn" id="kokoro-load">Download voice now</button>
+            <p class="hint" id="kokoro-status"></p>
+          </div>
+          <div data-show="device kokoro">
             <p class="hint">For much better iPhone voices, download Premium or Enhanced voices in iPhone Settings › Accessibility › Read &amp; Speak › Voices (on older iOS: Spoken Content › Voices). Then tap Refresh voice list.</p>
             <button type="button" class="btn" id="refresh-voices">${ICONS.replay} Refresh voice list</button>
             <p class="hint" id="voice-count"></p>
@@ -765,7 +783,7 @@ function renderSettings() {
   const form = document.getElementById("settings-form");
   const showFor = () => {
     const p = form.ttsProvider.value;
-    form.querySelectorAll("[data-show]").forEach((el) => (el.hidden = el.dataset.show !== p));
+    form.querySelectorAll("[data-show]").forEach((el) => (el.hidden = !el.dataset.show.split(" ").includes(p)));
   };
   const fillVoices = () => {
     const voices = deviceVoices();
@@ -827,6 +845,7 @@ function renderSettings() {
       model: f.model.value,
       effort: f.effort.value,
       ttsProvider: f.ttsProvider.value,
+      kokoroVoice: f.kokoroVoice.value,
       openaiKey: f.openaiKey.value.trim(),
       openaiVoice: f.openaiVoice.value,
       elevenKey: f.elevenKey.value.trim(),
@@ -851,6 +870,22 @@ function renderSettings() {
     if (e.target.type === "password" || e.target.type === "text" || e.target.tagName === "INPUT") save();
   });
   form.addEventListener("submit", (e) => e.preventDefault());
+
+  const kStatus = document.getElementById("kokoro-status");
+  const kButton = document.getElementById("kokoro-load");
+  const showKokoro = (st) => {
+    if (!document.body.contains(kStatus)) return unsubKokoro();
+    kStatus.textContent = {
+      idle: "Not downloaded yet.",
+      loading: `Downloading and starting the voice… ${st.progress}%`,
+      ready: "Ready. The voice is on your phone.",
+      error: `Couldn't load the voice: ${st.error}`,
+    }[st.status];
+    kButton.hidden = st.status === "ready" || st.status === "loading";
+  };
+  const unsubKokoro = onKokoroState(showKokoro);
+  showKokoro(kokoroState());
+  kButton.onclick = () => loadKokoro().catch(() => {});
 
   document.getElementById("test-voice").onclick = () => {
     save();

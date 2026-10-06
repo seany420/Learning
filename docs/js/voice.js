@@ -1,3 +1,5 @@
+import { kokoroSpeak } from "./kokoro.js";
+
 // Speech in and speech out.
 //
 // Speaking: tutor text is split into sentence-sized chunks as it streams in.
@@ -164,7 +166,30 @@ export class Speaker {
     const gen = this.gen;
     this.lastText += text + " ";
     let ready;
-    if (effectiveTts(s) === "device") {
+    const engine = effectiveTts(s);
+    if (engine === "kokoro") {
+      // English goes to the on-phone natural voice; Spanish and Japanese
+      // phrases go to iPhone voices, in order.
+      for (const seg of toSegments(text)) {
+        if (seg.lang !== "en") {
+          this.queue.push(Promise.resolve(() => this.playDevice([seg], s, gen)));
+          continue;
+        }
+        const job = kokoroSpeak(seg.text, s.kokoroVoice);
+        this.queue.push(
+          job.then(
+            (blob) => () => this.playBlob(blob, s, gen),
+            (err) => {
+              this.onError?.(new Error(`Natural voice failed (${err.message}). Using iPhone voice instead.`));
+              return () => this.playDevice([seg], s, gen);
+            }
+          )
+        );
+      }
+      this.run();
+      return;
+    }
+    if (engine === "device") {
       const segs = toSegments(text);
       ready = Promise.resolve(() => this.playDevice(segs, s, gen));
     } else {

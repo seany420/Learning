@@ -29,7 +29,8 @@ export const DEFAULT_SETTINGS = {
   elevenKey: "",
   model: "claude-opus-5-5",
   effort: "low",
-  ttsProvider: "openai", // openai | elevenlabs | device
+  ttsProvider: "openai", // openai | elevenlabs | kokoro | device
+  kokoroVoice: "af_heart",
   openaiVoice: "marin",
   elevenVoiceId: "21m00Tcm4TlvDq8ikWAM",
   elevenModel: "eleven_multilingual_v2",
