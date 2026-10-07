@@ -531,6 +531,8 @@ class SessionController {
     const abort = new AbortController();
     this.abort = abort;
     let message;
+    const askedAt = performance.now();
+    let firstText = true;
     try {
       message = await streamTurn({
         settings: s,
@@ -538,6 +540,10 @@ class SessionController {
         messages: this.data.messages,
         signal: abort.signal,
         onText: (delta) => {
+          if (firstText) {
+            firstText = false;
+            diag(`Claude: first words after ${((performance.now() - askedAt) / 1000).toFixed(1)}s (${s.model.replace("claude-", "")}, effort ${s.effort})`);
+          }
           raw += delta;
           pending.raw = raw;
           bubble.classList.remove("pending");
@@ -621,6 +627,7 @@ class SessionController {
     this.alive = false;
     this.interruptOutput();
     if (listener.listening) listener.cancel();
+    listener.releaseMic();
     if (this.data.messages.length) store.saveSession(this.key, this.data);
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.unsubKokoro?.();
@@ -677,7 +684,7 @@ function renderSettings() {
           <label>Model
             <select name="model">
               ${opt("claude-opus-5-5", s.model, "Claude Opus 5.5 (best teaching)")}
-              ${opt("claude-sonnet-5-5", s.model, "Claude Sonnet 5.5 (faster, cheaper)")}
+              ${opt("claude-sonnet-5-5", s.model, "Claude Sonnet 5.5 (fastest replies, cheaper)")}
             </select>
           </label>
           <label>Effort
@@ -746,8 +753,8 @@ function renderSettings() {
           </label>
           <button type="button" class="btn" id="test-voice">${ICONS.play} Test voice</button>
           <p class="hint" id="test-status" aria-live="polite"></p>
-          <details class="diag" data-show="kokoro">
-            <summary>Voice log (for troubleshooting)</summary>
+          <details class="diag">
+            <summary>Speed and voice log (for troubleshooting)</summary>
             <pre id="diag-log"></pre>
             <button type="button" class="btn" id="diag-copy">Copy log</button>
           </details>
@@ -770,9 +777,13 @@ function renderSettings() {
             <input type="checkbox" name="handsFree" ${s.handsFree ? "checked" : ""} />
             Hands-free: start listening automatically after the tutor speaks
           </label>
+          <label class="row">
+            <input type="checkbox" name="keepMicOpen" ${s.keepMicOpen !== false ? "checked" : ""} />
+            Keep the mic connected during lessons (much faster with AirPods; the voice sounds a little more like a phone call)
+          </label>
           <label>Pause before your turn ends
             <select name="silenceMs">
-              ${[1000, 1300, 1600, 2200, 3000].map((m) => opt(String(m), String(s.silenceMs), `${m / 1000} seconds`)).join("")}
+              ${[800, 1000, 1200, 1600, 2200, 3000].map((m) => opt(String(m), String(s.silenceMs), `${m / 1000} seconds`)).join("")}
             </select>
           </label>
           <p class="hint">Longer pauses help when you're thinking in Spanish or Japanese. You can always tap the mic to finish.</p>
@@ -865,6 +876,7 @@ function renderSettings() {
       speechRate: parseFloat(f.speechRate.value),
       sttProvider: f.sttProvider.value,
       handsFree: f.handsFree.checked,
+      keepMicOpen: f.keepMicOpen.checked,
       silenceMs: parseInt(f.silenceMs.value, 10),
     });
     const el = document.getElementById("saved");
