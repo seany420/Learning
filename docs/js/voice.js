@@ -195,7 +195,14 @@ export class Speaker {
     this.lastText += text + " ";
     let ready;
     let engine = effectiveTts(s);
-    if (engine === "kokoro" && kokoroState().status !== "ready") {
+    let downloaded = false;
+    try {
+      downloaded = !!localStorage.getItem("lv:kokoroDownloaded");
+    } catch {}
+    const kState = kokoroState().status;
+    // Already on the phone: just wait the few seconds it takes to start.
+    if (engine === "kokoro" && downloaded && kState !== "error") loadKokoro().catch(() => {});
+    else if (engine === "kokoro" && kState !== "ready") {
       // Never sit silent while the natural voice downloads: speak with the
       // iPhone voice for now and keep loading in the background.
       if (kokoroState().status !== "error") loadKokoro().catch(() => {});
@@ -210,7 +217,7 @@ export class Speaker {
           this.queue.push(Promise.resolve(() => this.playDevice([seg], s, gen)));
           continue;
         }
-        const job = withTimeout(kokoroSpeak(seg.text, s.kokoroVoice, s.speechRate || 1), 30000, "it took too long");
+        const job = withTimeout(kokoroSpeak(seg.text, s.kokoroVoice, s.speechRate || 1), 60000, "it took over a minute");
         this.queue.push(
           job.then(
             (pcm) => () => this.playPcm(pcm, gen),

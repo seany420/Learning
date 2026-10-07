@@ -881,7 +881,9 @@ function renderSettings() {
     if (!document.body.contains(kStatus)) return unsubKokoro();
     kStatus.textContent = {
       idle: "Not downloaded yet.",
-      loading: `Downloading and starting the voice… ${st.progress}%`,
+      loading: localStorage.getItem("lv:kokoroDownloaded")
+        ? "Starting the voice…"
+        : `Downloading and starting the voice… ${st.progress}%`,
       ready: "Ready. The voice is on your phone.",
       error: `Couldn't load the voice: ${st.error}`,
     }[st.status];
@@ -908,10 +910,29 @@ function renderSettings() {
           ? `The natural voice couldn't load (${st.error}), so you're hearing the iPhone voice.`
           : `The natural voice is still downloading (${st.progress}%), so you're hearing the iPhone voice for now. Test again when it says Ready.`;
     };
-    if (engine === "kokoro" && kokoroState().status === "ready") testStatus.textContent = "Playing the natural voice. The first sentence can take a few seconds.";
-    speaker.say("Hi! This is how I'll sound in your lessons.");
-    speaker.say("En español: <es>¡Hola! ¿Cómo estás hoy?</es>");
-    speaker.say("And in Japanese: <ja>こんにちは。よろしくお願いします。</ja> [[konnichiwa]]");
+    const sample = () => {
+      speaker.say("Hi! This is how I'll sound in your lessons.");
+      speaker.say("En español: <es>¡Hola! ¿Cómo estás hoy?</es>");
+      speaker.say("And in Japanese: <ja>こんにちは。よろしくお願いします。</ja> [[konnichiwa]]");
+    };
+    if (engine !== "kokoro") return sample();
+    if (!localStorage.getItem("lv:kokoroDownloaded")) {
+      testStatus.textContent = "The natural voice isn't downloaded yet. Tap Download voice now, wait for Ready, then test again. Until then you'll hear the iPhone voice.";
+      return sample();
+    }
+    // Test the natural voice itself: wait for it to start instead of
+    // falling back to the iPhone voice.
+    if (kokoroState().status !== "ready") testStatus.textContent = "Starting the natural voice…";
+    loadKokoro().then(
+      () => {
+        if (!document.body.contains(testStatus)) return;
+        testStatus.textContent = "Playing the natural voice. The first sentence can take several seconds.";
+        sample();
+      },
+      (err) => {
+        if (document.body.contains(testStatus)) testStatus.textContent = `The natural voice couldn't start: ${err.message}`;
+      }
+    );
   };
 
   document.getElementById("export-btn").onclick = () => {
@@ -961,6 +982,12 @@ const ICONS = {
 
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+// The natural voice takes a few seconds to start each time the app opens.
+// Start it right away so lessons don't fall back to the iPhone voice.
+if (store.getSettings().ttsProvider === "kokoro" && localStorage.getItem("lv:kokoroDownloaded")) {
+  loadKokoro().catch(() => {});
 }
 
 route();
