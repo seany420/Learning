@@ -3,6 +3,8 @@
 // 90 MB) download from Hugging Face on first use and stay cached afterward.
 // It speaks English only, so Spanish and Japanese still use iPhone voices.
 
+import { diag } from "./diag.js";
+
 const MODEL = "onnx-community/Kokoro-82M-v1.0-ONNX";
 
 export const KOKORO_VOICES = [
@@ -60,8 +62,11 @@ export function loadKokoro() {
   if (!ttsPromise) {
     emit({ status: "loading", progress: 0, error: null });
     lastActivity = Date.now();
+    const started = performance.now();
+    diag("natural voice: loading library");
     const load = (async () => {
       const { KokoroTTS } = await import("../vendor/kokoro.web.js");
+      diag("natural voice: library loaded, starting model");
       return KokoroTTS.from_pretrained(MODEL, { dtype: "q8", device: "wasm", progress_callback: onProgress });
     })();
     // Give up if nothing happens for 2 minutes, so the app never waits forever.
@@ -77,12 +82,14 @@ export function loadKokoro() {
     ttsPromise = Promise.race([load, stalled]);
     ttsPromise.then(
       () => {
+        diag(`natural voice: ready after ${((performance.now() - started) / 1000).toFixed(1)}s`);
         try {
           localStorage.setItem("lv:kokoroDownloaded", "1");
         } catch {}
         emit({ status: "ready", progress: 100 });
       },
       (err) => {
+        diag(`natural voice: FAILED to start: ${err?.message || err}`);
         ttsPromise = null;
         emit({ status: "error", error: err?.message || String(err) });
       }
@@ -99,8 +106,17 @@ export function loadKokoro() {
 export function kokoroSpeak(text, voice, speed = 1) {
   const job = chain.then(async () => {
     const tts = await loadKokoro();
-    const audio = await tts.generate(text, { voice: voice || "af_heart", speed: Math.min(2, Math.max(0.5, speed)) });
-    return { samples: audio.audio, rate: audio.sampling_rate };
+    const t = performance.now();
+    diag(`generate: "${text.slice(0, 30)}"`);
+    try {
+      const audio = await tts.generate(text, { voice: voice || "af_heart", speed: Math.min(2, Math.max(0.5, speed)) });
+      const secs = audio?.audio?.length / audio?.sampling_rate;
+      diag(`generated ${secs.toFixed(1)}s of audio in ${((performance.now() - t) / 1000).toFixed(1)}s`);
+      return { samples: audio.audio, rate: audio.sampling_rate };
+    } catch (err) {
+      diag(`generate FAILED: ${err?.message || err}`);
+      throw err;
+    }
   });
   chain = job.catch(() => {});
   return job;
