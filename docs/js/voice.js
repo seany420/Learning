@@ -1,4 +1,5 @@
 import { kokoroSpeak, kokoroState, loadKokoro } from "./kokoro.js";
+import { diag } from "./diag.js";
 
 // Speech in and speech out.
 //
@@ -200,6 +201,7 @@ export class Speaker {
       downloaded = !!localStorage.getItem("lv:kokoroDownloaded");
     } catch {}
     const kState = kokoroState().status;
+    if (engine === "kokoro" || s.ttsProvider === "kokoro") diag(`say: engine=${engine} voiceState=${kState} downloaded=${downloaded}`);
     // Already on the phone: just wait the few seconds it takes to start.
     if (engine === "kokoro" && downloaded && kState !== "error") loadKokoro().catch(() => {});
     else if (engine === "kokoro" && kState !== "ready") {
@@ -222,6 +224,7 @@ export class Speaker {
           job.then(
             (pcm) => () => this.playPcm(pcm, gen),
             (err) => {
+              diag(`falling back to iPhone voice: ${err.message}`);
               this.onError?.(new Error(`Natural voice failed (${err.message}). Using iPhone voice instead.`));
               return () => this.playDevice([seg], s, gen);
             }
@@ -334,10 +337,12 @@ export class Speaker {
     const ctx = audioCtx();
     if (!ctx) throw new Error("This browser can't play generated audio.");
     setAudioSession("playback");
+    diag(`play: ${(samples.length / rate).toFixed(1)}s, audio state=${ctx.state}`);
     if (ctx.state !== "running") {
       try {
         await ctx.resume();
       } catch {}
+      diag(`play: after resume, audio state=${ctx.state}`);
     }
     if (ctx.state !== "running") throw new Error("Sound is blocked. Tap the mic or Test voice again to enable it.");
     const buffer = ctx.createBuffer(1, samples.length, rate);
@@ -351,7 +356,10 @@ export class Speaker {
         this.finishCurrent = null;
         resolve();
       };
-      src.onended = done;
+      src.onended = () => {
+        diag("play: finished");
+        done();
+      };
       this.finishCurrent = () => {
         try {
           src.stop();

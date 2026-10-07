@@ -12,6 +12,7 @@ import {
   deviceVoices,
   deviceSttAvailable,
 } from "./voice.js";
+import { diag, onDiag, diagText } from "./diag.js";
 import { KOKORO_VOICES, loadKokoro, kokoroState, onKokoroState } from "./kokoro.js";
 
 const $app = document.getElementById("app");
@@ -745,6 +746,11 @@ function renderSettings() {
           </label>
           <button type="button" class="btn" id="test-voice">${ICONS.play} Test voice</button>
           <p class="hint" id="test-status" aria-live="polite"></p>
+          <details class="diag" data-show="kokoro">
+            <summary>Voice log (for troubleshooting)</summary>
+            <pre id="diag-log"></pre>
+            <button type="button" class="btn" id="diag-copy">Copy log</button>
+          </details>
         </section>
 
         <section class="card">
@@ -893,7 +899,22 @@ function renderSettings() {
   showKokoro(kokoroState());
   kButton.onclick = () => loadKokoro().catch(() => {});
 
+  const diagEl = document.getElementById("diag-log");
+  const unsubDiag = onDiag((lines) => {
+    if (!document.body.contains(diagEl)) return unsubDiag?.();
+    diagEl.textContent = lines.length ? lines.join("\n") : "Nothing logged yet. Tap Test voice.";
+  });
+  document.getElementById("diag-copy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(`${navigator.userAgent}\n${diagText()}`);
+      document.getElementById("diag-copy").textContent = "Copied";
+    } catch {
+      document.getElementById("diag-copy").textContent = "Couldn't copy, take a screenshot";
+    }
+  };
+
   document.getElementById("test-voice").onclick = () => {
+    diag(`test tapped, engine=${store.getSettings().ttsProvider}`);
     save();
     speaker.unlock();
     speaker.stop();
@@ -983,6 +1004,8 @@ const ICONS = {
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
+
+diag(`app opened: ${navigator.userAgent.match(/OS [\d_]+|Version\/[\d.]+/g)?.join(" ") || navigator.userAgent.slice(0, 60)}${navigator.standalone ? ", home screen app" : ""}`);
 
 // The natural voice takes a few seconds to start each time the app opens.
 // Start it right away so lessons don't fall back to the iPhone voice.
