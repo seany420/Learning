@@ -19,7 +19,8 @@ function baseParams(settings, system, messages) {
     max_tokens: 16000,
     system,
     messages,
-    thinking: { type: "adaptive" },
+    // Sonnet 5.5 can skip thinking entirely, which makes replies start sooner.
+    thinking: settings.model === "claude-sonnet-5-5" ? { type: "between_tools" } : { type: "adaptive" },
     output_config: { effort: settings.effort },
     cache_control: { type: "ephemeral" },
     // Re-run a declined request on Anthropic's recommended fallback model.

@@ -110,7 +110,13 @@ export class Chunker {
 
 // ---------- audio session helpers (iOS) ----------
 
+// While a lesson keeps the mic open, stay in play-and-record. Switching the
+// session type makes AirPods change Bluetooth mode, which costs a second or
+// more each time.
+let micHeld = false;
+
 function setAudioSession(type) {
+  if (micHeld && type === "playback") return;
   try {
     if (navigator.audioSession) navigator.audioSession.type = type;
   } catch {}
@@ -240,7 +246,14 @@ export class Speaker {
     } else {
       const spoken = toSpeech(text);
       if (!spoken) return;
-      const fetcher = s.ttsProvider === "elevenlabs" ? fetchEleven(spoken, s) : fetchOpenAI(spoken, s);
+      if (s.ttsProvider === "openai") {
+        // Start downloading now; play the audio as it streams in.
+        const stream = openaiPcmStream(spoken, s);
+        this.queue.push(Promise.resolve(() => this.playPcmStream(stream, gen)));
+        this.run();
+        return;
+      }
+      const fetcher = fetchEleven(spoken, s);
       // Swallow here so an early failure isn't reported as unhandled; the
       // playback loop surfaces it in order.
       fetcher.catch(() => {});
@@ -331,6 +344,92 @@ export class Speaker {
     });
   }
 
+  // Plays audio that is still downloading: schedules each piece on the Web
+  // Audio clock as it arrives, so speech starts within a fraction of a second.
+  async playPcmStream(st, gen) {
+    if (gen !== this.gen) return;
+    const ctx = audioCtx();
+    if (!ctx) throw new Error("This browser can't play streamed audio.");
+    setAudioSession("playback");
+    if (ctx.state !== "running") {
+      try {
+        await ctx.resume();
+      } catch {}
+    }
+    if (ctx.state !== "running") throw new Error("Sound is blocked. Tap the mic or Test voice again to enable it.");
+
+    const sources = [];
+    let stopped = false;
+    let t = 0;
+    let started = false;
+    let last = null;
+    this.finishCurrent = () => {
+      stopped = true;
+      sources.forEach((src) => {
+        try {
+          src.stop();
+        } catch {}
+      });
+      st.wake();
+    };
+    const take = () => {
+      const parts = st.chunks.splice(0);
+      const n = parts.reduce((a, p) => a + p.length, 0);
+      const out = new Float32Array(n);
+      let o = 0;
+      for (const p of parts) {
+        out.set(p, o);
+        o += p.length;
+      }
+      return out;
+    };
+    const buffered = () => st.chunks.reduce((a, p) => a + p.length, 0);
+
+    while (!stopped && gen === this.gen) {
+      // Buffer a quarter second before starting so the first words don't stutter.
+      const ready = started ? buffered() > 0 : buffered() >= st.rate / 4 || (st.done && buffered() > 0);
+      if (ready) {
+        const data = take();
+        const buf = ctx.createBuffer(1, data.length, st.rate);
+        buf.copyToChannel(data, 0);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        t = Math.max(t, ctx.currentTime + 0.03);
+        src.start(t);
+        if (!started) {
+          started = true;
+          st.onFirstPlay?.();
+        }
+        t += buf.duration;
+        sources.push(src);
+        last = src;
+        continue;
+      }
+      if (st.done) break;
+      await new Promise((res) => (st.notify = res));
+    }
+    if (st.error && !started) throw st.error;
+    if (!stopped && last) {
+      const remaining = t - ctx.currentTime;
+      if (remaining > 0) {
+        await new Promise((res) => {
+          const timer = setTimeout(res, remaining * 1000 + 50);
+          this.finishCurrent = () => {
+            clearTimeout(timer);
+            sources.forEach((src) => {
+              try {
+                src.stop();
+              } catch {}
+            });
+            res();
+          };
+        });
+      }
+    }
+    this.finishCurrent = null;
+  }
+
   // Plays raw samples through Web Audio (used by the natural voice).
   async playPcm({ samples, rate }, gen) {
     if (gen !== this.gen || !samples?.length) return;
@@ -410,21 +509,71 @@ const OPENAI_STYLE =
   "Speak like a warm, engaged human tutor on a phone call: natural pacing, real warmth, light humor where it fits. " +
   "When you say Spanish or Japanese words, pronounce them like a native speaker, a little slower and very clearly so a learner can imitate them.";
 
-async function fetchOpenAI(text, s) {
-  if (!s.openaiKey) throw new Error("Add an OpenAI API key in Settings, or switch the voice to iPhone voices.");
-  const res = await fetch("https://api.openai.com/v1/audio/speech", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${s.openaiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "gpt-4o-mini-tts",
-      voice: s.openaiVoice || "marin",
-      input: text,
-      instructions: OPENAI_STYLE,
-      response_format: "mp3",
-    }),
-  });
-  if (!res.ok) throw new Error(`OpenAI voice error (${res.status}): ${await safeText(res)}`);
-  return res.blob();
+function paceInstruction(rate) {
+  if (!rate || rate === 1) return "";
+  if (rate <= 0.75) return " Speak slowly, at about 70% of a normal pace, with clear pauses between phrases.";
+  if (rate < 1) return " Speak a little slower than normal, very clearly.";
+  return " Speak a little faster than normal.";
+}
+
+// Requests raw 24 kHz 16-bit PCM from OpenAI and exposes it as it streams.
+// Returns a state object the player reads from: { chunks, done, error }.
+function openaiPcmStream(text, s) {
+  const st = { chunks: [], rate: 24000, done: false, error: null, notify: null };
+  st.wake = () => {
+    const n = st.notify;
+    st.notify = null;
+    n?.();
+  };
+  const t0 = performance.now();
+  st.onFirstPlay = () => diag(`voice: first sound ${((performance.now() - t0) / 1000).toFixed(1)}s after request`);
+  (async () => {
+    try {
+      if (!s.openaiKey) throw new Error("Add an OpenAI API key in Settings, or switch the voice to iPhone voices.");
+      const res = await fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${s.openaiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "gpt-4o-mini-tts",
+          voice: s.openaiVoice || "marin",
+          input: text,
+          instructions: OPENAI_STYLE + paceInstruction(s.speechRate),
+          response_format: "pcm",
+        }),
+      });
+      if (!res.ok) throw new Error(`OpenAI voice error (${res.status}): ${await safeText(res)}`);
+      const reader = res.body.getReader();
+      let carry = null;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        let bytes = value;
+        if (carry) {
+          const merged = new Uint8Array(carry.length + bytes.length);
+          merged.set(carry);
+          merged.set(bytes, carry.length);
+          bytes = merged;
+          carry = null;
+        }
+        if (bytes.length % 2) {
+          carry = bytes.slice(bytes.length - 1);
+          bytes = bytes.slice(0, bytes.length - 1);
+        }
+        if (!bytes.length) continue;
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const out = new Float32Array(bytes.length / 2);
+        for (let i = 0; i < out.length; i++) out[i] = view.getInt16(i * 2, true) / 32768;
+        st.chunks.push(out);
+        st.wake();
+      }
+    } catch (err) {
+      st.error = err;
+      diag(`voice: OpenAI error: ${err.message}`);
+    }
+    st.done = true;
+    st.wake();
+  })();
+  return st;
 }
 
 async function fetchEleven(text, s) {
@@ -511,6 +660,14 @@ export class Listener {
     this.active?.finish();
   }
 
+  // Turn the mic fully off (when leaving a lesson).
+  releaseMic() {
+    this.heldStream?.getTracks().forEach((t) => t.stop());
+    this.heldStream = null;
+    micHeld = false;
+    setAudioSession("playback");
+  }
+
   cancel() {
     this.active?.cancel();
   }
@@ -570,13 +727,20 @@ export class Listener {
   async listenOpenAI(s, lang, prompt) {
     this.prime();
     setAudioSession("play-and-record");
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-    } catch (err) {
-      throw new Error("Microphone access was denied. Allow it in Settings > Safari > Microphone (or for this app).");
+    let stream = this.heldStream?.getAudioTracks().some((t) => t.readyState === "live") ? this.heldStream : null;
+    if (!stream) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+      } catch (err) {
+        throw new Error("Microphone access was denied. Allow it in Settings > Safari > Microphone (or for this app).");
+      }
+    }
+    const keep = s.keepMicOpen !== false;
+    if (keep) {
+      this.heldStream = stream;
+      micHeld = true;
     }
 
     const mime = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"].find(
@@ -634,7 +798,7 @@ export class Listener {
         lastLoud = now;
       }
       if (!s.handsFree) return;
-      if (heardSpeech && now - lastLoud > (s.silenceMs || 1600)) finishRec();
+      if (heardSpeech && now - lastLoud > (s.silenceMs || 1200)) finishRec();
       if (!heardSpeech && now - started > 15000) {
         cancelled = true;
         finishRec();
@@ -645,18 +809,21 @@ export class Listener {
     clearInterval(timer);
     if (!cancelled) this.onRecorded?.();
     this.onLevel?.(0);
-    stream.getTracks().forEach((t) => t.stop());
+    if (!keep) stream.getTracks().forEach((t) => t.stop());
     try {
       source?.disconnect();
     } catch {}
     this.active = null;
     setAudioSession("playback");
+    const endedAt = performance.now();
 
     if (cancelled || !chunks.length) return "";
     const type = rec.mimeType || mime || "audio/webm";
     const blob = new Blob(chunks, { type });
     if (blob.size < 2000) return "";
-    return transcribeOpenAI(blob, type, s, lang, prompt);
+    const text = await transcribeOpenAI(blob, type, s, lang, prompt);
+    diag(`listen: transcribed in ${((performance.now() - endedAt) / 1000).toFixed(1)}s`);
+    return text;
   }
 }
 

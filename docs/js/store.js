@@ -38,7 +38,8 @@ export const DEFAULT_SETTINGS = {
   speechRate: 1.0,
   sttProvider: "openai", // openai | device
   handsFree: true,
-  silenceMs: 1600,
+  silenceMs: 1200,
+  keepMicOpen: true,
 };
 
 export function getSettings() {
