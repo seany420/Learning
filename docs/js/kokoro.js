@@ -76,7 +76,12 @@ export function loadKokoro() {
     });
     ttsPromise = Promise.race([load, stalled]);
     ttsPromise.then(
-      () => emit({ status: "ready", progress: 100 }),
+      () => {
+        try {
+          localStorage.setItem("lv:kokoroDownloaded", "1");
+        } catch {}
+        emit({ status: "ready", progress: 100 });
+      },
       (err) => {
         ttsPromise = null;
         emit({ status: "error", error: err?.message || String(err) });
