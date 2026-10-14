@@ -415,11 +415,80 @@ const clinical = [
     ["Grand rounds: complex case 2", "Integrated case: perinatal patient with trauma history, anxiety, and housing instability."],
     ["Grand rounds: complex case 3", "Integrated case: older adult with cognitive decline, grief, alcohol use, and caregiver burnout."],
   ]],
+  // Units below are taught as leadership scenarios ("leadership") or mock
+  // interviews ("interview") instead of patient cases.
+  ["IBH Program Design and Implementation", [
+    ["Choosing a model", "PCBH vs. Collaborative Care vs. co-located specialty care vs. hybrids. What each does well, what each costs, and how to pick for a given clinic, population, and payer mix."],
+    ["Needs assessment and readiness", "Using population data, PCP surveys, and readiness tools to scope a program. Stakeholder mapping: who has to say yes and who can quietly sink it."],
+    ["Staffing and roles", "BHC, care manager, psychiatric consultant, CHW, and peer roles. Staffing ratios and panel sizes, job descriptions, core competencies, and hiring for the generalist mindset."],
+    ["Clinical workflows", "Warm handoffs, same-day access, huddles, EHR templates, screening-to-follow-up pathways, and crisis protocols that actually run on a busy clinic day."],
+    ["Implementation science", "CFIR, RE-AIM, and EPIS in plain terms. Using them to plan a launch, predict barriers, and evaluate whether the program took hold."],
+    ["Fidelity", "What model fidelity means in PCBH and CoCM, fidelity measures such as the PPAQ, and how programs drift back into a mini mental health clinic."],
+    ["Scaling and spread", "Moving from 1 pilot site to many: standard work vs. local adaptation, training pipelines, and protecting fidelity at scale."],
+  ], "leadership"],
+  ["Operations and Administration", [
+    ["Scheduling and access", "Template design, open-access slots, no-show management, and protecting same-day capacity for warm handoffs."],
+    ["Productivity and capacity", "Encounters per day, penetration rate, same-day percentage, and FTE planning. Setting productivity targets that are fair and sustainable."],
+    ["Policies and procedures", "Writing and maintaining P&Ps for crisis response, mandated reporting, consent, and documentation in an integrated setting."],
+    ["Compliance and risk", "HIPAA in shared records, 42 CFR Part 2, licensure and supervision of associates, incident reporting, and risk management. Flag that rules change and to verify current requirements."],
+    ["EHR and documentation systems", "Building templates, registries, and reports. Getting the data you need without burying clinicians in clicks."],
+    ["Managing through disruption", "Staff turnover, leave coverage, budget cuts, and leading through an EHR conversion or merger."],
+  ], "leadership"],
+  ["Finance and Sustainability", [
+    ["How integrated care gets paid", "Fee-for-service psychotherapy codes, health behavior assessment and intervention codes, Collaborative Care and general BHI codes, at a conceptual level. Flag that codes, rates, and rules change and must be verified."],
+    ["FQHCs and Medi-Cal", "PPS rates, same-day billing, UDS reporting, and how California's Medi-Cal changes shape behavioral health. Flag where details may be out of date."],
+    ["Value-based care", "ACOs, capitation, pay-for-performance, and quality incentives. How integrated care earns money by lowering total cost of care."],
+    ["Building a budget", "Personnel, overhead, cost per encounter, break-even analysis, and presenting a budget that leadership believes."],
+    ["Making the business case", "ROI and cost-offset evidence, what it does and doesn't prove, and building a case leadership will fund."],
+    ["Grants and diversified funding", "Grant strategy, writing a strong needs statement and logic model, and planning sustainability before the grant ends."],
+  ], "leadership"],
+  ["Quality Improvement and Measurement", [
+    ["The Model for Improvement", "Aim statements, measures, change ideas, and PDSA cycles done well: small, fast, and documented."],
+    ["Reading data over time", "Run charts and control charts, common vs. special cause variation, and not overreacting to one bad month."],
+    ["Choosing measures", "Process, outcome, and balancing measures. Building a dashboard of the few KPIs that matter for an IBH program."],
+    ["Measurement-based care at scale", "Registries, treat-to-target, response and remission rates, and population-level depression and anxiety outcomes."],
+    ["Quality measures and reporting", "HEDIS and other payer measures related to depression screening and follow-up, UDS measures, and how they tie to incentive money. Flag that measure specs change yearly."],
+    ["Lean and root cause tools", "Process mapping, fishbone diagrams, 5 whys, and waste reduction in a clinic workflow."],
+    ["Equity in QI", "Stratifying data by race, language, and payer, spotting disparities, and designing improvement work that closes gaps."],
+    ["Presenting results", "Turning data into a story: one-page summaries, SBAR, and presenting to executives, boards, and frontline teams."],
+  ], "leadership"],
+  ["Leading People and Teams", [
+    ["From clinician to leader", "What changes when you move into leadership: identity, boundaries, former peers, and where your time goes."],
+    ["Leadership styles", "Transformational, servant, adaptive, and situational leadership, and when each fits an integrated care team."],
+    ["Hiring and onboarding", "Behavioral interviewing for BHCs, onboarding plans, competency checklists, and the first 90 days for a new hire."],
+    ["Performance management", "Setting expectations, giving feedback, coaching, documentation, and having the hard conversation."],
+    ["Change management", "Kotter and ADKAR applied to rolling out a new workflow. Earning buy-in from PCPs, nurses, front desk, and executives."],
+    ["Conflict and team dynamics", "Interprofessional tension, role confusion, scope disputes, and repairing a team that has split into camps."],
+    ["Retention and team wellbeing", "Burnout as a system problem, workload design, recognition, and keeping good clinicians."],
+    ["Culturally responsive leadership", "Building a diverse team, language access, equity in policies, and leading conversations about bias."],
+    ["Managing up", "Working with medical directors, COOs, and CEOs: reading priorities, framing requests, and negotiating for resources."],
+  ], "leadership"],
+  ["Strategy and Systems", [
+    ["The healthcare landscape", "Payer types, managed care, value-based contracts, and where behavioral health fits in system strategy. Flag where policy may have changed."],
+    ["Population health strategy", "Stepped care across a system, risk stratification, and matching services to population need."],
+    ["Partnerships", "Specialty mental health, SUD treatment, schools, community organizations, and closing referral loops."],
+    ["Telehealth and digital strategy", "Virtual integrated care, digital therapeutics, AI tools, and choosing technology that helps instead of distracts."],
+    ["Workforce development", "Training programs, practicum and residency pipelines, supervision structures, and growing your own BHCs."],
+    ["Ethics in leadership", "Productivity pressure vs. care quality, resource allocation, transparency, and protecting clinical judgment."],
+    ["Strategic planning", "SWOT, setting 1 to 3 year goals, aligning with organizational priorities, and writing a plan people actually follow."],
+  ], "leadership"],
+  ["Interview and New Role Preparation", [
+    ["Telling your story", "A tight 2-minute answer to 'tell me about yourself' that connects clinical work, the DBH, and leadership. Practice until it's natural."],
+    ["Behavioral questions", "Mock interview: STAR-format questions on leading change, handling conflict, failure, and influence without authority."],
+    ["IBH program questions", "Mock interview: how you'd build, expand, or rescue an integrated care program, with specifics on models, workflows, and staffing."],
+    ["Data and QI questions", "Mock interview: what metrics you'd track, a QI project you led, and how you'd use data to make a decision."],
+    ["Finance and operations questions", "Mock interview: productivity, billing, budgets, and sustainability questions for a management role."],
+    ["Leadership scenarios", "Mock interview: hypothetical situations such as a PCP who won't use warm handoffs, a struggling BHC, or a sudden budget cut."],
+    ["Your 30-60-90 day plan", "Building and presenting a first-90-days plan: listening tour, quick wins, data review, and setting priorities."],
+    ["Your questions and negotiation", "Strong questions to ask interviewers, reading red flags, and negotiating title, salary, and scope."],
+    ["Full mock panel interview", "A complete mock panel interview from start to finish, with a scored debrief at the end."],
+  ], "interview"],
 ];
 
 function build(prefix, units) {
-  return units.map(([title, lessons], u) => ({
+  return units.map(([title, lessons, style], u) => ({
     title,
+    style: style || null,
     lessons: lessons.map(([t, focus], i) => ({ id: `${prefix}-${u + 1}-${i + 1}`, title: t, focus })),
   }));
 }
@@ -454,7 +523,7 @@ export const TRACKS = {
     name: "Clinical Practice",
     group: "Clinical",
     lang: "en",
-    blurb: "Case-based challenges in integrated behavioral health, risk, trauma, ethics, and more.",
+    blurb: "Case challenges in integrated behavioral health, plus IBH leadership, operations, finance, QI, and interview prep.",
     units: build("cl", clinical),
   },
 };

@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS = {
   sttProvider: "openai", // openai | device
   handsFree: true,
   silenceMs: 1200,
-  keepMicOpen: true,
+  audioMode: "smooth", // smooth: best Bluetooth sound | fast: mic stays on, lower delay
 };
 
 export function getSettings() {

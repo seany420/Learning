@@ -129,9 +129,67 @@ let sharedCtx = null;
 export function audioCtx() {
   if (!sharedCtx) {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (AC) sharedCtx = new AC();
+    if (AC) {
+      sharedCtx = new AC();
+      // Bluetooth reconnects, calls, and Siri can interrupt audio. Log it and
+      // try to resume so the lesson keeps going.
+      sharedCtx.onstatechange = () => {
+        diag(`audio: ${sharedCtx.state}`);
+        if (keepAliveSrc && sharedCtx.state !== "running" && sharedCtx.state !== "closed") {
+          sharedCtx.resume().catch(() => {});
+        }
+      };
+      try {
+        navigator.mediaDevices?.addEventListener?.("devicechange", () => {
+          diag("audio: device changed (Bluetooth connect or disconnect)");
+          if (keepAliveSrc) sharedCtx.resume().catch(() => {});
+        });
+      } catch {}
+    }
   }
   return sharedCtx;
+}
+
+// Bluetooth earbuds and glasses power down their audio link after a moment
+// of silence, which clips the first word of the next sentence. During a
+// lesson, play an inaudible hiss to keep the link awake.
+let keepAliveSrc = null;
+
+export function startKeepAlive() {
+  const ctx = audioCtx();
+  if (!ctx || keepAliveSrc) return;
+  try {
+    const len = ctx.sampleRate * 2;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * 0.0004;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(ctx.destination);
+    src.start();
+    keepAliveSrc = src;
+  } catch {}
+}
+
+export function stopKeepAlive() {
+  try {
+    keepAliveSrc?.stop();
+  } catch {}
+  keepAliveSrc = null;
+}
+
+// After the mic turns off, Bluetooth needs a moment to switch from call mode
+// back to high-quality audio. Speech started during the switch gets clipped.
+let routeSettleUntil = 0;
+
+async function waitForRoute() {
+  const wait = routeSettleUntil - performance.now();
+  if (wait > 0) await new Promise((res) => setTimeout(res, wait));
+}
+
+function sleep(ms) {
+  return new Promise((res) => setTimeout(res, ms));
 }
 
 // Call from a tap handler.
@@ -249,7 +307,7 @@ export class Speaker {
       if (s.ttsProvider === "openai") {
         // Start downloading now; play the audio as it streams in.
         const stream = openaiPcmStream(spoken, s);
-        this.queue.push(Promise.resolve(() => this.playPcmStream(stream, gen)));
+        this.queue.push(Promise.resolve(() => this.playOpenAI(spoken, s, gen, stream)));
         this.run();
         return;
       }
@@ -276,6 +334,14 @@ export class Speaker {
         await play();
       } catch (err) {
         if (gen === this.gen) this.onError?.(err);
+      }
+      // Bluetooth plays audio a few hundred milliseconds behind the phone.
+      // Before saying we're done (and opening the mic), let the last words
+      // actually reach the listener's ears.
+      if (!this.queue.length && gen === this.gen) {
+        const ctx = sharedCtx;
+        const latency = ((ctx?.outputLatency || 0) + (ctx?.baseLatency || 0)) * 1000;
+        await sleep(Math.min(1500, latency + (this.getSettings().audioMode === "fast" ? 250 : 600)));
       }
     }
     this.running = false;
@@ -344,6 +410,24 @@ export class Speaker {
     });
   }
 
+  // Plays one OpenAI sentence. If the connection drops partway, request the
+  // sentence again and replay it rather than leaving it unfinished.
+  async playOpenAI(text, s, gen, stream) {
+    let st = stream;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await this.playPcmStream(st, gen);
+      } catch (err) {
+        if (attempt === 1 || gen !== this.gen) throw err;
+      }
+      if (!st.error || gen !== this.gen) return;
+      if (attempt === 0) {
+        diag(`voice: connection dropped (${st.error.message}), replaying the sentence`);
+        st = openaiPcmStream(text, s);
+      }
+    }
+  }
+
   // Plays audio that is still downloading: schedules each piece on the Web
   // Audio clock as it arrives, so speech starts within a fraction of a second.
   async playPcmStream(st, gen) {
@@ -357,6 +441,7 @@ export class Speaker {
       } catch {}
     }
     if (ctx.state !== "running") throw new Error("Sound is blocked. Tap the mic or Test voice again to enable it.");
+    await waitForRoute();
 
     const sources = [];
     let stopped = false;
@@ -387,7 +472,7 @@ export class Speaker {
 
     while (!stopped && gen === this.gen) {
       // Buffer a quarter second before starting so the first words don't stutter.
-      const ready = started ? buffered() > 0 : buffered() >= st.rate / 4 || (st.done && buffered() > 0);
+      const ready = started ? buffered() > 0 : buffered() >= st.rate * st.prebuffer || (st.done && buffered() > 0);
       if (ready) {
         const data = take();
         const buf = ctx.createBuffer(1, data.length, st.rate);
@@ -395,6 +480,7 @@ export class Speaker {
         const src = ctx.createBufferSource();
         src.buffer = buf;
         src.connect(ctx.destination);
+        if (started && t < ctx.currentTime) diag("voice: audio arrived late (slow connection), short gap");
         t = Math.max(t, ctx.currentTime + 0.03);
         src.start(t);
         if (!started) {
@@ -444,6 +530,7 @@ export class Speaker {
       diag(`play: after resume, audio state=${ctx.state}`);
     }
     if (ctx.state !== "running") throw new Error("Sound is blocked. Tap the mic or Test voice again to enable it.");
+    await waitForRoute();
     const buffer = ctx.createBuffer(1, samples.length, rate);
     buffer.copyToChannel(samples instanceof Float32Array ? samples : Float32Array.from(samples), 0);
     await new Promise((resolve) => {
@@ -519,7 +606,9 @@ function paceInstruction(rate) {
 // Requests raw 24 kHz 16-bit PCM from OpenAI and exposes it as it streams.
 // Returns a state object the player reads from: { chunks, done, error }.
 function openaiPcmStream(text, s) {
-  const st = { chunks: [], rate: 24000, done: false, error: null, notify: null };
+  // Smooth mode buffers half a second before speaking so a slow connection
+  // doesn't make the voice stutter.
+  const st = { chunks: [], rate: 24000, prebuffer: s.audioMode === "fast" ? 0.25 : 0.5, done: false, error: null, notify: null };
   st.wake = () => {
     const n = st.notify;
     st.notify = null;
@@ -545,7 +634,20 @@ function openaiPcmStream(text, s) {
       const reader = res.body.getReader();
       let carry = null;
       for (;;) {
-        const { value, done } = await reader.read();
+        let timer;
+        const stall = new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("no audio for 8 seconds")), 8000);
+        });
+        let result;
+        try {
+          result = await Promise.race([reader.read(), stall]);
+        } catch (err) {
+          reader.cancel().catch(() => {});
+          throw err;
+        } finally {
+          clearTimeout(timer);
+        }
+        const { value, done } = result;
         if (done) break;
         let bytes = value;
         if (carry) {
@@ -737,7 +839,7 @@ export class Listener {
         throw new Error("Microphone access was denied. Allow it in Settings > Safari > Microphone (or for this app).");
       }
     }
-    const keep = s.keepMicOpen !== false;
+    const keep = s.audioMode === "fast";
     if (keep) {
       this.heldStream = stream;
       micHeld = true;
@@ -809,7 +911,10 @@ export class Listener {
     clearInterval(timer);
     if (!cancelled) this.onRecorded?.();
     this.onLevel?.(0);
-    if (!keep) stream.getTracks().forEach((t) => t.stop());
+    if (!keep) {
+      stream.getTracks().forEach((t) => t.stop());
+      routeSettleUntil = performance.now() + 900;
+    }
     try {
       source?.disconnect();
     } catch {}

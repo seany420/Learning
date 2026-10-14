@@ -4,6 +4,8 @@ import * as store from "./store.js";
 import { streamTurn, summarize, textOf } from "./tutor.js";
 import {
   Speaker,
+  startKeepAlive,
+  stopKeepAlive,
   Listener,
   Chunker,
   toDisplayHtml,
@@ -355,6 +357,7 @@ class SessionController {
   prime() {
     speaker.unlock();
     listener.prime();
+    startKeepAlive();
     this.requestWakeLock();
   }
 
@@ -628,6 +631,7 @@ class SessionController {
     this.interruptOutput();
     if (listener.listening) listener.cancel();
     listener.releaseMic();
+    stopKeepAlive();
     if (this.data.messages.length) store.saveSession(this.key, this.data);
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.unsubKokoro?.();
@@ -777,10 +781,13 @@ function renderSettings() {
             <input type="checkbox" name="handsFree" ${s.handsFree ? "checked" : ""} />
             Hands-free: start listening automatically after the tutor speaks
           </label>
-          <label class="row">
-            <input type="checkbox" name="keepMicOpen" ${s.keepMicOpen !== false ? "checked" : ""} />
-            Keep the mic connected during lessons (much faster with AirPods; the voice sounds a little more like a phone call)
+          <label>Bluetooth audio (AirPods, glasses, headphones)
+            <select name="audioMode">
+              ${opt("smooth", s.audioMode, "Smooth: full-quality sound, no cut-offs (recommended)")}
+              ${opt("fast", s.audioMode, "Fast: mic stays on, quicker replies, phone-call sound")}
+            </select>
           </label>
+          <p class="hint">Smooth lets your earbuds or glasses switch back to high-quality audio between turns and waits for each sentence to finish playing. Fast keeps them in call mode the whole lesson, which saves about a second per turn but sounds thinner and can be choppy on some devices.</p>
           <label>Pause before your turn ends
             <select name="silenceMs">
               ${[800, 1000, 1200, 1600, 2200, 3000].map((m) => opt(String(m), String(s.silenceMs), `${m / 1000} seconds`)).join("")}
@@ -876,7 +883,7 @@ function renderSettings() {
       speechRate: parseFloat(f.speechRate.value),
       sttProvider: f.sttProvider.value,
       handsFree: f.handsFree.checked,
-      keepMicOpen: f.keepMicOpen.checked,
+      audioMode: f.audioMode.value,
       silenceMs: parseInt(f.silenceMs.value, 10),
     });
     const el = document.getElementById("saved");
