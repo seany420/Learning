@@ -227,6 +227,8 @@ h1, h2 { margin: 0; letter-spacing: -0.01em; }
   transition: transform 0.08s linear, opacity 0.2s;
 }
 .mic[data-state="listening"] .ring { opacity: 0.55; }
+.mic[data-state="warming"] { background: color-mix(in srgb, var(--error) 55%, var(--surface-2)); }
+.mic[data-state="warming"] .ring { opacity: 0.4; border-color: var(--error); animation: pulse 0.9s ease-in-out infinite; }
 .mic[data-state="listening"] { background: var(--error); }
 .mic[data-state="listening"] .ring { border-color: var(--error); }
 .mic[data-state="thinking"] .ring,

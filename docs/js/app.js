@@ -5,6 +5,7 @@ import { streamTurn, summarize, textOf } from "./tutor.js";
 import {
   Speaker,
   startKeepAlive,
+  playCue,
   stopKeepAlive,
   Listener,
   Chunker,
@@ -329,6 +330,11 @@ class SessionController {
     listener.onLevel = (lvl) => this.$ring.style.setProperty("--lvl", lvl.toFixed(2));
     listener.onInterim = (t) => (this.$interim.textContent = t);
     listener.onRecorded = () => this.alive && this.setState("transcribing");
+    listener.onReady = () => {
+      if (!this.alive || this.state !== "warming") return;
+      this.setState("listening");
+      if (store.getSettings().turnBeep !== false) playCue();
+    };
 
     this.unsubKokoro = onKokoroState((st) => {
       if (!this.alive || st.status !== "loading") return;
@@ -375,14 +381,15 @@ class SessionController {
     this.$mic.dataset.state = state;
     const labels = {
       idle: "Tap the mic to talk",
-      listening: store.getSettings().handsFree ? "Listening… pause when you're done" : "Listening… tap when you're done",
+      warming: "Getting the mic ready…",
+      listening: store.getSettings().handsFree ? "Your turn. Take your time, pause when you're done" : "Your turn. Tap when you're done",
       transcribing: "Got it…",
       thinking: "Thinking…",
       speaking: "Speaking… tap to interrupt",
       saving: "Writing lesson notes…",
     };
     this.setStatus(labels[state] || "");
-    document.getElementById("mic-icon").innerHTML = state === "listening" ? ICONS.stop : state === "speaking" ? ICONS.hand : ICONS.mic;
+    document.getElementById("mic-icon").innerHTML = state === "listening" || state === "warming" ? ICONS.stop : state === "speaking" ? ICONS.hand : ICONS.mic;
   }
 
   setStatus(text) {
@@ -436,7 +443,7 @@ class SessionController {
 
   onMic() {
     this.prime();
-    if (this.state === "listening") return listener.stop();
+    if (this.state === "listening" || this.state === "warming") return listener.stop();
     if (this.state === "transcribing" || this.state === "saving") return;
     if (this.state === "thinking" || this.state === "speaking") {
       this.interruptOutput();
@@ -488,7 +495,7 @@ class SessionController {
 
   async listen() {
     if (!this.alive || listener.listening) return;
-    this.setState("listening");
+    this.setState("warming");
     this.$interim.textContent = "";
     let text = "";
     try {
@@ -582,7 +589,7 @@ class SessionController {
     if (this.state === "thinking" && !speaker.speaking) this.setState("idle");
     await speaker.whenIdle();
     if (!this.alive || this.abort) return;
-    if (this.state === "listening") return;
+    if (this.state === "listening" || this.state === "warming") return;
     if (store.getSettings().handsFree) this.listen();
     else this.setState("idle");
   }
@@ -639,7 +646,7 @@ class SessionController {
       this.wakeLock?.release();
     } catch {}
     speaker.onStateChange = null;
-    listener.onLevel = listener.onInterim = listener.onRecorded = null;
+    listener.onLevel = listener.onInterim = listener.onRecorded = listener.onReady = null;
     session = null;
   }
 }
@@ -788,9 +795,13 @@ function renderSettings() {
             </select>
           </label>
           <p class="hint">Smooth lets your earbuds or glasses switch back to high-quality audio between turns and waits for each sentence to finish playing. Fast keeps them in call mode the whole lesson, which saves about a second per turn but sounds thinner and can be choppy on some devices.</p>
+          <label class="row">
+            <input type="checkbox" name="turnBeep" ${s.turnBeep !== false ? "checked" : ""} />
+            Chime when it's my turn to talk
+          </label>
           <label>Pause before your turn ends
             <select name="silenceMs">
-              ${[800, 1000, 1200, 1600, 2200, 3000].map((m) => opt(String(m), String(s.silenceMs), `${m / 1000} seconds`)).join("")}
+              ${[1200, 1600, 2000, 2500, 3000, 4000].map((m) => opt(String(m), String(s.silenceMs), `${m / 1000} seconds${m === 2000 ? " (recommended)" : ""}`)).join("")}
             </select>
           </label>
           <p class="hint">Longer pauses help when you're thinking in Spanish or Japanese. You can always tap the mic to finish.</p>
@@ -884,6 +895,7 @@ function renderSettings() {
       sttProvider: f.sttProvider.value,
       handsFree: f.handsFree.checked,
       audioMode: f.audioMode.value,
+      turnBeep: f.turnBeep.checked,
       silenceMs: parseInt(f.silenceMs.value, 10),
     });
     const el = document.getElementById("saved");

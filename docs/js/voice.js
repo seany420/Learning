@@ -188,6 +188,29 @@ async function waitForRoute() {
   if (wait > 0) await new Promise((res) => setTimeout(res, wait));
 }
 
+// A short, soft two-note chime: "your turn to talk".
+export function playCue() {
+  const ctx = audioCtx();
+  if (!ctx || ctx.state !== "running") return;
+  try {
+    const t = ctx.currentTime + 0.02;
+    for (const [freq, at] of [
+      [660, 0],
+      [880, 0.11],
+    ]) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, t + at);
+      gain.gain.linearRampToValueAtTime(0.12, t + at + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.12);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t + at);
+      osc.stop(t + at + 0.14);
+    }
+  } catch {}
+}
+
 function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
@@ -341,7 +364,7 @@ export class Speaker {
       if (!this.queue.length && gen === this.gen) {
         const ctx = sharedCtx;
         const latency = ((ctx?.outputLatency || 0) + (ctx?.baseLatency || 0)) * 1000;
-        await sleep(Math.min(1500, latency + (this.getSettings().audioMode === "fast" ? 250 : 600)));
+        await sleep(Math.min(1800, latency + (this.getSettings().audioMode === "fast" ? 300 : 900)));
       }
     }
     this.running = false;
@@ -744,6 +767,7 @@ export class Listener {
     this.onLevel = null; // (0..1) => void
     this.onInterim = null; // (text) => void
     this.onRecorded = null; // recording finished, transcription starting
+    this.onReady = null; // mic is live: the learner can start talking
   }
 
   // Call inside a tap handler so iOS allows the audio context to run.
@@ -822,6 +846,7 @@ export class Listener {
         },
       };
       setAudioSession("play-and-record");
+      rec.onstart = () => this.onReady?.();
       rec.start();
     });
   }
@@ -878,33 +903,67 @@ export class Listener {
       },
     };
 
+    // Recording starts right away, so nothing you say early is lost, but
+    // Bluetooth mics (glasses, earbuds) take a moment to switch into call mode
+    // and send silence or a pop meanwhile. Wait until the mic is live before
+    // judging speech, then cue the learner.
     rec.start(250);
     const started = performance.now();
+    const minWarmup = keep ? 100 : 500;
+    let readyAt = 0;
     let heardSpeech = false;
+    let loudRun = 0;
+    let speechMs = 0;
     let lastLoud = performance.now();
-    let noise = 0.01;
+    let noise = 0;
     const data = analyser ? new Float32Array(analyser.fftSize) : null;
+    const patience = Math.max(800, s.silenceMs || 2000);
+    const markReady = (now) => {
+      readyAt = now;
+      lastLoud = now;
+      diag(`listen: mic ready after ${((now - started) / 1000).toFixed(1)}s`);
+      this.onReady?.();
+    };
+    if (!analyser) markReady(started);
     const timer = setInterval(() => {
       const now = performance.now();
-      if (now - started > 90000) return finishRec();
+      if (now - started > 120000) return finishRec();
       if (!analyser) return;
       analyser.getFloatTimeDomainData(data);
       let sum = 0;
       for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
       const rms = Math.sqrt(sum / data.length);
-      this.onLevel?.(Math.min(1, rms * 12));
-      if (now - started < 400) noise = Math.max(noise, rms);
-      const threshold = Math.max(0.015, noise * 2.5);
+      this.onLevel?.(Math.min(1, rms * 25));
+      if (!readyAt) {
+        // Live once the mic sends real signal (or after 3 seconds regardless).
+        if ((rms > 0.00003 && now - started > minWarmup) || now - started > 3000) {
+          noise = rms;
+          markReady(now);
+        }
+        return;
+      }
+      // Adaptive noise floor: follows the quiet background, not speech. Glasses
+      // and earbud mics are quiet, so the speech threshold stays low.
+      const threshold = Math.max(0.004, noise * 3);
       if (rms > threshold) {
-        if (!heardSpeech && now - started > 150) heardSpeech = true;
+        loudRun += 60;
+        if (loudRun >= 180) {
+          if (!heardSpeech) diag("listen: heard you start talking");
+          heardSpeech = true;
+        }
+        if (heardSpeech) speechMs += 60;
         lastLoud = now;
+      } else {
+        loudRun = 0;
+        noise = noise ? noise * 0.97 + rms * 0.03 : rms;
       }
       if (!s.handsFree) return;
-      if (heardSpeech && now - lastLoud > (s.silenceMs || 1200)) finishRec();
-      if (!heardSpeech && now - started > 15000) {
-        cancelled = true;
-        finishRec();
-      }
+      // Give longer answers more room to pause and think.
+      const pause = patience + Math.min(1500, speechMs / 10);
+      if (heardSpeech && now - lastLoud > pause) finishRec();
+      // Nothing detected for 30 seconds: stop, but still transcribe in case
+      // the voice was too quiet to detect.
+      if (!heardSpeech && now - readyAt > 30000) finishRec();
     }, 60);
 
     await stopped;

@@ -38,12 +38,20 @@ export const DEFAULT_SETTINGS = {
   speechRate: 1.0,
   sttProvider: "openai", // openai | device
   handsFree: true,
-  silenceMs: 1200,
+  silenceMs: 2000,
+  turnBeep: true,
   audioMode: "smooth", // smooth: best Bluetooth sound | fast: mic stays on, lower delay
 };
 
 export function getSettings() {
   const s = { ...DEFAULT_SETTINGS, ...read("settings", {}) };
+  // v2: earlier versions ended turns after 1.2 to 1.6 seconds of silence,
+  // which cut people off. Raise saved values once.
+  if (!s.listenV2) {
+    s.listenV2 = true;
+    if ((s.silenceMs || 0) < 2000) s.silenceMs = 2000;
+    write("settings", s);
+  }
   s.deviceVoices = { ...DEFAULT_SETTINGS.deviceVoices, ...(s.deviceVoices || {}) };
   return s;
 }
