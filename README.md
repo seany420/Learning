@@ -7,7 +7,7 @@ A voice tutor for your iPhone. You talk, it talks back. It has 4 courses with fu
 | Spanish | 73 in 11 units, A1 to C1, with a unit on clinical Spanish | You speak from the first minute. It models a phrase, you repeat, it corrects you and builds from there. |
 | Japanese | 63 in 10 units, first sounds through N3, keigo, and Kansai-ben | Same speaking-first method. Kana and romaji appear on screen while you listen. |
 | Irish History | 96 in 15 units, Mount Sandel to Brexit | Told as stories in short pieces. You can interrupt with questions at any point, and it quizzes you. |
-| Clinical Practice | 75 in 12 units: PCBH, MI, risk, trauma, SUD, ethics, grand rounds | Case challenges. It gives you a vignette, you say what you'd do, it gives you direct feedback and teaches the evidence. |
+| Clinical Practice | 127 in 19 units: PCBH, MI, risk, trauma, SUD, ethics, grand rounds, then IBH program design, operations, finance, QI, leadership, strategy, and interview prep | Patient case challenges for clinical units. Leadership units use management scenarios with real-looking numbers. The interview unit runs mock interviews with feedback and a stronger version of each answer. |
 
 Every course also has **Free conversation** for practice outside the lesson plan.
 
