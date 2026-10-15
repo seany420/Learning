@@ -60,41 +60,84 @@ export function toDisplayHtml(text) {
   return html.replace(/\n/g, "<br>");
 }
 
-// Incremental sentence chunker that never splits inside a language tag or a
-// pronunciation guide.
+// Incremental sentence chunker. Splits at sentence ends as text streams in,
+// including inside <es>/<ja> passages: a long Spanish or Japanese stretch is
+// closed at the cut and reopened in the next chunk, so speech can start
+// without waiting for the whole reply. Never splits inside a [[guide]].
 export class Chunker {
   constructor(onChunk, minLen = 60) {
     this.buf = "";
+    this.openLang = null; // language tag still open at the start of buf
     this.onChunk = onChunk;
     this.minLen = minLen;
     this.first = true;
   }
   push(delta) {
     this.buf += delta;
-    let start = 0;
-    let depth = 0;
-    let cut = -1;
     const b = this.buf;
+    let start = 0;
+    let startLang = this.openLang;
+    let lang = this.openLang;
+    let guide = false;
     for (let i = 0; i < b.length; i++) {
-      if (b.startsWith("<es>", i) || b.startsWith("<ja>", i) || b.startsWith("[[", i)) depth++;
-      else if (b.startsWith("</es>", i) || b.startsWith("</ja>", i) || b.startsWith("]]", i)) depth = Math.max(0, depth - 1);
-      if (depth > 0) continue;
+      const open = b.startsWith("<es>", i) ? "es" : b.startsWith("<ja>", i) ? "ja" : null;
+      if (open) {
+        lang = open;
+        i += 3;
+        continue;
+      }
+      if (b.startsWith("</es>", i) || b.startsWith("</ja>", i)) {
+        lang = null;
+        i += 4;
+        continue;
+      }
+      if (b.startsWith("[[", i)) {
+        guide = true;
+        i += 1;
+        continue;
+      }
+      if (b.startsWith("]]", i)) {
+        guide = false;
+        i += 1;
+        continue;
+      }
+      if (guide) continue;
       const ch = b[i];
       const isEnd = ".!?。！？…".includes(ch) || ch === "\n";
       if (!isEnd) continue;
       let j = i + 1;
-      while (j < b.length && `"'”’)]`.includes(b[j])) j++;
+      while (j < b.length && `"'”’)]»`.includes(b[j])) j++;
+      // Punctuation right before a closing tag: the tag belongs to this chunk.
+      let cutLang = lang;
+      if (b.startsWith("</es>", j) || b.startsWith("</ja>", j)) {
+        j += 5;
+        cutLang = null;
+      }
       // Western punctuation needs following whitespace; Japanese doesn't.
       if (".!?…".includes(ch) && !(j < b.length && /\s/.test(b[j]))) continue;
-      // A closing tag right after punctuation belongs to this chunk.
+      // "Now say ¿Cómo estás? and I'll answer." keeps going: a lowercase word
+      // after the punctuation means the sentence isn't over.
+      if (ch !== "\n") {
+        let k = j;
+        while (k < b.length && /\s/.test(b[k])) k++;
+        if (k >= b.length) continue; // wait to see the next word
+        if (/\p{Ll}/u.test(b[k])) continue;
+      }
       const minLen = this.first ? 20 : this.minLen;
       if (j - start >= minLen || ch === "\n") {
-        cut = j;
-        this.emit(b.slice(start, j));
+        const prefix = startLang ? `<${startLang}>` : "";
+        const suffix = cutLang ? `</${cutLang}>` : "";
+        this.emit(prefix + b.slice(start, j) + suffix);
         start = j;
+        startLang = cutLang;
+        lang = cutLang;
+        i = j - 1;
       }
     }
-    if (cut >= 0) this.buf = b.slice(start);
+    if (start > 0) {
+      this.buf = b.slice(start);
+      this.openLang = startLang;
+    }
   }
   emit(text) {
     if (toSpeech(text)) {
@@ -103,8 +146,9 @@ export class Chunker {
     }
   }
   flush() {
-    if (this.buf) this.emit(this.buf);
+    if (this.buf) this.emit((this.openLang ? `<${this.openLang}>` : "") + this.buf);
     this.buf = "";
+    this.openLang = null;
   }
 }
 
@@ -213,6 +257,43 @@ export function playCue() {
 
 function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
+}
+
+// iOS can pause the audio engine for a moment when the mic turns off or a
+// Bluetooth device changes mode. Try a few times before giving up on it.
+async function ensureRunning(ctx) {
+  for (let i = 0; i < 4 && ctx.state !== "running"; i++) {
+    try {
+      await ctx.resume();
+    } catch {}
+    if (ctx.state !== "running") await sleep(150);
+  }
+  if (ctx.state !== "running") diag(`audio: engine stuck in "${ctx.state}", using the backup player`);
+  return ctx.state === "running";
+}
+
+// 16-bit WAV, which Safari's regular audio player can always play.
+function wavBlob(samples, rate) {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const str = (o, t) => [...t].forEach((c, k) => v.setUint8(o + k, c.charCodeAt(0)));
+  str(0, "RIFF");
+  v.setUint32(4, 36 + samples.length * 2, true);
+  str(8, "WAVEfmt ");
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  str(36, "data");
+  v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const x = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+  }
+  return new Blob([buf], { type: "audio/wav" });
 }
 
 // Call from a tap handler.
@@ -328,6 +409,7 @@ export class Speaker {
       const spoken = toSpeech(text);
       if (!spoken) return;
       if (s.ttsProvider === "openai") {
+        diag(`voice: sentence queued (${spoken.length} chars): "${spoken.slice(0, 28)}"`);
         // Start downloading now; play the audio as it streams in.
         const stream = openaiPcmStream(spoken, s);
         this.queue.push(Promise.resolve(() => this.playOpenAI(spoken, s, gen, stream)));
@@ -458,12 +540,21 @@ export class Speaker {
     const ctx = audioCtx();
     if (!ctx) throw new Error("This browser can't play streamed audio.");
     setAudioSession("playback");
-    if (ctx.state !== "running") {
-      try {
-        await ctx.resume();
-      } catch {}
+    if (!(await ensureRunning(ctx))) {
+      // Backup: wait for the whole sentence, then use the regular player.
+      while (!st.done) await new Promise((res) => (st.notify = res));
+      if (st.error && !st.chunks.length) throw st.error;
+      const all = st.chunks.splice(0);
+      const n = all.reduce((a, p) => a + p.length, 0);
+      const joined = new Float32Array(n);
+      let o = 0;
+      for (const p of all) {
+        joined.set(p, o);
+        o += p.length;
+      }
+      if (n) await this.playBlob(wavBlob(joined, st.rate), { speechRate: 1 }, gen);
+      return;
     }
-    if (ctx.state !== "running") throw new Error("Sound is blocked. Tap the mic or Test voice again to enable it.");
     await waitForRoute();
 
     const sources = [];
@@ -546,13 +637,9 @@ export class Speaker {
     if (!ctx) throw new Error("This browser can't play generated audio.");
     setAudioSession("playback");
     diag(`play: ${(samples.length / rate).toFixed(1)}s, audio state=${ctx.state}`);
-    if (ctx.state !== "running") {
-      try {
-        await ctx.resume();
-      } catch {}
-      diag(`play: after resume, audio state=${ctx.state}`);
+    if (!(await ensureRunning(ctx))) {
+      return this.playBlob(wavBlob(samples instanceof Float32Array ? samples : Float32Array.from(samples), rate), { speechRate: 1 }, gen);
     }
-    if (ctx.state !== "running") throw new Error("Sound is blocked. Tap the mic or Test voice again to enable it.");
     await waitForRoute();
     const buffer = ctx.createBuffer(1, samples.length, rate);
     buffer.copyToChannel(samples instanceof Float32Array ? samples : Float32Array.from(samples), 0);
